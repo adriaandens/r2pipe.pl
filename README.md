@@ -3,8 +3,9 @@
     use Pwn::r2pipe;
 
     my $r2 = Pwn::r2pipe->new('/bin/ls');
-    $r2->cmd('iI');
-    $r2->cmdj('ij');
+    my $result = $r2->cmd('iI');
+    my $ds = $r2->cmdj('ij');
+    print "Architecture: " . $ds->{bin}->{machine} . "\n";
     $r2->quit();
 
     # Other stuff
