@@ -1,5 +1,7 @@
 # Pwn::r2pipe
 
+Note: Of course, once I was almost ready with this code, I found that there is already an (official) implementation [here](https://github.com/radare/radare2-bindings/blob/master/r2pipe/perl/R2/Pipe.pm). But whatevah.
+
     use Pwn::r2pipe;
 
     my $r2 = Pwn::r2pipe->new('/bin/ls');
