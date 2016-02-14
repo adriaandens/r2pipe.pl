@@ -22,16 +22,16 @@ use JSON;
 our $VERSION = 0.2;
 
 sub new {
-	my $class = shift;
-	my $self = {};
+    my $class = shift;
+    my $self = {};
 
-	# Bless you.
-	bless $self, $class;
+    # Bless you.
+    bless $self, $class;
 
-	# Open connection to r2 if argument was given.
+    # Open connection to r2 if argument was given.
     $self->parse_filename(shift) if @_;
 
-	return $self;
+    return $self;
 }
 
 sub parse_filename {
@@ -84,7 +84,7 @@ sub r2pipe_file {
 }
 
 sub r2_exists {
-	`which r2`;
+    `which r2`;
 }
 
 sub spawn_r2 {
@@ -92,7 +92,7 @@ sub spawn_r2 {
     die "spawn_r2(): No radare2 found in PATH\n" if ! r2_exists();
 
     # Create PTY and store
-	my $r2pipe = IO::Pty::Easy->new;
+    my $r2pipe = IO::Pty::Easy->new;
     $self->{r2} = $r2pipe;
 
     # Spawn
@@ -102,21 +102,21 @@ sub spawn_r2 {
 
 # Input: Filename to open in r2
 sub open {
-	my $self = shift;
-	return -1 if scalar(@_) != 1; # No argument to open :(
-	return -2 if $self->{opened}; # We already have opened a file in r2?
+    my $self = shift;
+    return -1 if scalar(@_) != 1; # No argument to open :(
+    return -2 if $self->{opened}; # We already have opened a file in r2?
 
     # Open...
     $self->parse_filename(shift);
 }
 
 sub cmd {
-	my $self = shift;
+    my $self = shift;
 
-	# Argument handling
-	return -1 if scalar(@_) != 1; # No command to execute? :(
-	return -2 if ! $self->{opened}; # No file was loaded. :(
-	my $command = shift;
+    # Argument handling
+    return -1 if scalar(@_) != 1; # No command to execute? :(
+    return -2 if ! $self->{opened}; # No file was loaded. :(
+    my $command = shift;
 
     # Route the command...
     my $method_name = 'cmd_' . $self->{type}; # Cause I'm lazy
@@ -128,8 +128,8 @@ sub cmd {
 }
 
 sub cmdj {
-	my $self = shift;
-	return decode_json($self->cmd(@_));
+    my $self = shift;
+    return decode_json($self->cmd(@_));
 }
 
 sub cmd_http {
@@ -154,53 +154,53 @@ sub cmd_tcp {
 
 sub cmd_file {
     my ($self, $command) = @_;
-	$self->{r2}->write($command . "\n");
+    $self->{r2}->write($command . "\n");
 
-	# Read the output...
-	my $output = $self->{r2}->read();
-	while($output !~ /\x00$/) { # Gambatte ne!
-		$output .= $self->{r2}->read();
-	}
+    # Read the output...
+    my $output = $self->{r2}->read();
+    while($output !~ /\x00$/) { # Gambatte ne!
+        $output .= $self->{r2}->read();
+    }
     # Clean up...
-	$output =~ s/^\x00//;
+    $output =~ s/^\x00//;
 
     # Return
     return $output;
 }
 
 sub quit {
-	my $self = shift;
+    my $self = shift;
 
-	# Routing...
-	my $quit_method = 'quit_' . $self->{type};
+    # Routing...
+    my $quit_method = 'quit_' . $self->{type};
 
-	# Calling
-	$self->$quit_method();
-	$self->{opened} = undef;
-	$self->{type} = undef;
+    # Calling
+    $self->$quit_method();
+    $self->{opened} = undef;
+    $self->{type} = undef;
 }
 
 sub quit_file {
-	my $self = shift;
-	$self->{r2}->close();
-	$self->{file} = undef;
+    my $self = shift;
+    $self->{r2}->close();
+    $self->{file} = undef;
 }
 
 sub quit_tcp {
-	my $self = shift;
-	$self->{socket}->close();
+    my $self = shift;
+    $self->{socket}->close();
 }
 
 sub quit_http {
-	my $self = shift;
-	$self->{ua} = undef;
-	$self->{uri} = undef;
+    my $self = shift;
+    $self->{ua} = undef;
+    $self->{uri} = undef;
 }
 
 # Just for handiness sake. 
 sub close {
-	my $self = shift;
-	$self->quit();
+    my $self = shift;
+    $self->quit();
 }
 
 1;
@@ -249,7 +249,7 @@ The C<new> constructor initializes r2 and optionally loads a file into r2.
 
 =head2 open($file)
 
-Opens the file in radare2.
+Opens the file in radare2. It also supports radare2 over TCP sockets (`$r2pipe->open("tcp://127.0.0.1:9080")`) and HTTP (`$r2pipe->open("http://127.0.0.1:9090")`).
 
 =head2 cmd($command)
 

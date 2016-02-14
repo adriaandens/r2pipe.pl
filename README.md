@@ -12,7 +12,7 @@ Note: Of course, once I was almost ready with this code, I found that there is a
 
     # Other stuff
     $r2 = Pwn::r2pipe->new;
-    $r2->open('/bin/ls');
+    $r2->open('http://localhost:9090');
     $r2->cmd('pi 5');
     $r2->close(); # Same as quit()
 
@@ -34,7 +34,7 @@ The new constructor initializes r2 and optionally loads a file into r2.
 
 ### open($file)
 
-Opens the file in radare2.
+Opens the file in radare2. It also supports radare2 over TCP sockets (`$r2pipe->open("tcp://127.0.0.1:9080")`) and HTTP (`$r2pipe->open("http://127.0.0.1:9090")`).
 
 ### cmd($command)
 
