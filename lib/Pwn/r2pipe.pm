@@ -4,55 +4,110 @@ package Pwn::r2pipe;
 # Declare dependencies
 use strict;
 use warnings;
+
+# Local r2 connection
 use IO::Pty::Easy;
+
+# r2 using TCP sockets
+use IO::Socket::INET;
+
+# r2 using HTTP web server
+use LWP::UserAgent;
+use URI::Escape;
+
+# JSON support
 use JSON;
 
 # Version
-our $VERSION = 0.1;
+our $VERSION = 0.2;
 
 sub new {
 	my $class = shift;
-	my %instance_values = ();
-
-	return -1 if ! r2_exists(); # What are you even doing... :(
-
-	# Create PTY
-	my $r2pipe = IO::Pty::Easy->new;
-	$instance_values{r2} = $r2pipe;
-
-	# Check if file was given
-	my $file;
-	if(scalar(@_) > 0) { 
-		$file = shift;
-		$instance_values{file} = $file;
-	}
-
-	# If file is legit, then open the file with radare2
-	if($file && -e $file && -f $file && -r $file) {
-		$instance_values{r2}->spawn("r2 -q0 $file 2>/dev/null");
-	}
+	my $self = {};
 
 	# Bless you.
-	bless \%instance_values, $class;
+	bless $self, $class;
+
+	# Open connection to r2 if argument was given.
+    $self->parse_filename(shift) if @_;
+
+	return $self;
+}
+
+sub parse_filename {
+    my ($self, $filename) = @_;
+    if($filename =~ m#^http://#i) { # It's an HTTP server
+        $self->r2pipe_http($filename);
+    } elsif($filename =~ m#^tcp://#i) { # TCP server
+        $self->r2pipe_tcp($filename);
+    } else { # File (probably...)
+        $self->r2pipe_file($filename);
+    }
+    # So that open() knows if it's already opened a file
+    $self->{opened} = 1; 
+}
+
+sub r2pipe_http {
+    my ($self, $base_uri) = @_;
+    $base_uri .= '/' if $base_uri !~ m#/$#;
+    $base_uri .= 'cmd/';
+
+    # Store type and URI in instance variables
+    $self->{type} = 'http';
+    $self->{uri} = $base_uri;
+    $self->{ua} = LWP::UserAgent->new;
+}
+
+sub r2pipe_tcp {
+    my ($self, $filename) = @_;
+    my ($hostname, $port) = $filename =~ m#^tcp://([^:]+):(\d+)/?#i;
+    # Open TCP socket to r2
+    my $socket = new IO::Socket::INET(PeerHost => $hostname, PeerPort => $port, Proto => 'tcp');
+    die "r2pipe_tcp(): Could not connect to '$hostname:$port': $!\n" unless $socket;
+    $socket->autoflush(1);
+
+    # Store type and socket
+    $self->{type} = 'tcp';
+    $self->{socket} = $socket;
+}
+
+sub r2pipe_file {
+    my ($self, $filename) = @_;
+    if(!(-e $filename && -f $filename && -r $filename)) { # Cannot read file :(
+        die "r2pipe_file(): File '$filename' is not readable.\n";
+    }
+    # Store type and URI in instance
+    $self->{type} = 'file';
+    $self->{file} = $filename;
+    # Spawn process
+    $self->spawn_r2($filename);
 }
 
 sub r2_exists {
 	`which r2`;
 }
 
+sub spawn_r2 {
+    my ($self, $file) = @_;
+    die "spawn_r2(): No radare2 found in PATH\n" if ! r2_exists();
+
+    # Create PTY and store
+	my $r2pipe = IO::Pty::Easy->new;
+    $self->{r2} = $r2pipe;
+
+    # Spawn
+    $self->{r2}->spawn("r2 -q0 $file 2>/dev/null");
+    $self->{r2}->read();
+}
+
 # Input: Filename to open in r2
 sub open {
 	my $self = shift;
 	return -1 if scalar(@_) != 1; # No argument to open :(
-	return -2 if $self->{file}; # We already have opened a file in r2?
+	return -2 if $self->{opened}; # We already have opened a file in r2?
 
-	my $file = shift;
-	# Check if filename exists, is a file and is readable
-	if(! (-e $file && -f $file && -r $file) ) {
-		return -3;
-	}
-	$self->{file} = $file;
-	$self->{r2}->spawn("r2 -q0 $file 2>/dev/null");
+    # Open...
+    $self->parse_filename(shift);
 }
 
 sub cmd {
@@ -60,34 +115,86 @@ sub cmd {
 
 	# Argument handling
 	return -1 if scalar(@_) != 1; # No command to execute? :(
-	return -2 if ! $self->{file}; # No file was loaded. :(
+	return -2 if ! $self->{opened}; # No file was loaded. :(
 	my $command = shift;
 
-	# Write the command...
-	$self->{r2}->write($command . "\n");
+    # Route the command...
+    my $method_name = 'cmd_' . $self->{type}; # Cause I'm lazy
 
-	# Read the output...
-	my $output = $self->{r2}->read();
-	$output .= $self->{r2}->read(); # Don't ask me why...
-	while(length($output) >= 8192) {
-		# We probably don't have everything...
-		$output .= $self->{r2}->read();
-		print "Read $output...\n";
-	}
-	$output =~ s/^\x00//; # Once again, don't ask me why this happens
-
-	return $output;
+    # Execute command
+    my $output = $self->$method_name($command);
+    $output =~ s/(\r?\n)*$//;
+    return $output;
 }
 
 sub cmdj {
 	my $self = shift;
-	return -1 if scalar(@_) != 1; # We need an argument...
-	return decode_json($self->cmd(shift));
+	return decode_json($self->cmd(@_));
+}
+
+sub cmd_http {
+    my ($self, $command) = @_;
+    my $url = $self->{uri} . uri_escape($command);
+    my $req = HTTP::Request->new(GET => $url);
+    my $response = $self->{ua}->request($req)->content;
+    return $response;
+}
+
+sub cmd_tcp {
+    my ($self, $command) = @_;
+    $self->{socket}->write($command . "\r\n", length($command) + 2);
+    my ($output, $data) = ('', '');
+    $self->{socket}->recv($data, 9000);
+    while($data) {
+        $output .= $data;
+        $self->{socket}->recv($data, 512);
+    }
+    return $output;
+}
+
+sub cmd_file {
+    my ($self, $command) = @_;
+	$self->{r2}->write($command . "\n");
+
+	# Read the output...
+	my $output = $self->{r2}->read();
+	while($output !~ /\x00$/) { # Gambatte ne!
+		$output .= $self->{r2}->read();
+	}
+    # Clean up...
+	$output =~ s/^\x00//;
+
+    # Return
+    return $output;
 }
 
 sub quit {
 	my $self = shift;
+
+	# Routing...
+	my $quit_method = 'quit_' . $self->{type};
+
+	# Calling
+	$self->$quit_method();
+	$self->{opened} = undef;
+	$self->{type} = undef;
+}
+
+sub quit_file {
+	my $self = shift;
 	$self->{r2}->close();
+	$self->{file} = undef;
+}
+
+sub quit_tcp {
+	my $self = shift;
+	$self->{socket}->close();
+}
+
+sub quit_http {
+	my $self = shift;
+	$self->{ua} = undef;
+	$self->{uri} = undef;
 }
 
 # Just for handiness sake. 
